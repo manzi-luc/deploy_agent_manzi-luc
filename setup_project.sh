@@ -26,57 +26,80 @@ echo "Creating project structure..."
 mkdir -p "${BASE_DIR}/Helpers"
 mkdir -p "${BASE_DIR}/reports"
 
+echo "Creating config.json..."
 cat > "${BASE_DIR}/Helpers/config.json" << 'EOF'
 {
-    "warning_threshold": 75,
-    "failure_threshold": 50
+    "thresholds": {
+        "warning": 75,
+        "failure": 50
+    },
+    "run_mode": "live",
+    "total_sessions": 15
 }
 EOF
 
+echo "Creating assets.csv..."
 cat > "${BASE_DIR}/Helpers/assets.csv" << 'EOF'
-StudentID,Name,Attendance
-001,Alice Mugisha,82
-002,Bob Nkusi,48
-003,Carol Uwase,71
-004,David Habimana,55
-005,Eve Mutesi,90
+Email,Names,Attendance Count,Absence Count
+alice@example.com,Alice Johnson,14,1
+bob@example.com,Bob Smith,7,8
+charlie@example.com,Charlie Davis,4,11
+diana@example.com,Diana Prince,15,0
 EOF
 
-touch "${BASE_DIR}/reports/reports.log"
+echo "Creating reports.log..."
+cat > "${BASE_DIR}/reports/reports.log" << 'EOF'
+--- Attendance Report Run: 2026-02-06 18:10:01.468726 ---
+[2026-02-06 18:10:01.469363] ALERT SENT TO bob@example.com: URGENT: Bob Smith, your attendance is 46.7%. You will fail this class.
+[2026-02-06 18:10:01.469424] ALERT SENT TO charlie@example.com: URGENT: Charlie Davis, your attendance is 26.7%. You will fail this class.
+EOF
 
+echo "Creating attendance_checker.py..."
 cat > "${BASE_DIR}/attendance_checker.py" << 'EOF'
-import json
 import csv
+import json
+import os
+from datetime import datetime
 
-with open("Helpers/config.json") as f:
-    config = json.load(f)
+def run_attendance_check():
+    with open('Helpers/config.json', 'r') as f:
+        config = json.load(f)
 
-WARNING = config["warning_threshold"]
-FAILURE = config["failure_threshold"]
+    if os.path.exists('reports/reports.log'):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.rename('reports/reports.log', f'reports/reports_{timestamp}.log.archive')
 
-log_lines = []
+    with open('Helpers/assets.csv', mode='r') as f, open('reports/reports.log', 'w') as log:
+        reader = csv.DictReader(f)
+        total_sessions = config['total_sessions']
 
-with open("Helpers/assets.csv") as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        pct = int(row["Attendance"])
-        if pct < FAILURE:
-            status = "FAIL"
-        elif pct < WARNING:
-            status = "WARNING"
-        else:
-            status = "OK"
-        line = f"{row['Name']}: {pct}% - {status}"
-        print(line)
-        log_lines.append(line)
+        log.write(f"--- Attendance Report Run: {datetime.now()} ---\n")
 
-with open("reports/reports.log", "w") as f:
-    f.write("\n".join(log_lines))
+        for row in reader:
+            name = row['Names']
+            email = row['Email']
+            attended = int(row['Attendance Count'])
 
-print("\nReport saved to reports/reports.log")
+            attendance_pct = (attended / total_sessions) * 100
+
+            message = ""
+            if attendance_pct < config['thresholds']['failure']:
+                message = f"URGENT: {name}, your attendance is {attendance_pct:.1f}%. You will fail this class."
+            elif attendance_pct < config['thresholds']['warning']:
+                message = f"WARNING: {name}, your attendance is {attendance_pct:.1f}%. Please be careful."
+
+            if message:
+                if config['run_mode'] == "live":
+                    log.write(f"[{datetime.now()}] ALERT SENT TO {email}: {message}\n")
+                    print(f"Logged alert for {name}")
+                else:
+                    print(f"[DRY RUN] Email to {email}: {message}")
+
+if __name__ == "__main__":
+    run_attendance_check()
 EOF
 
-echo "Files created."
+echo "All files created."
 
 echo ""
 read -p "Do you want to update attendance thresholds? (y/n): " UPDATE
@@ -96,10 +119,10 @@ if [ "${UPDATE}" = "y" ] || [ "${UPDATE}" = "Y" ]; then
         FAIL_VAL=50
     fi
 
-    sed -i "s/\"warning_threshold\": [0-9]*/\"warning_threshold\": ${WARN_VAL}/" \
+    sed -i "s/\"warning\": [0-9]*/\"warning\": ${WARN_VAL}/" \
         "${BASE_DIR}/Helpers/config.json"
 
-    sed -i "s/\"failure_threshold\": [0-9]*/\"failure_threshold\": ${FAIL_VAL}/" \
+    sed -i "s/\"failure\": [0-9]*/\"failure\": ${FAIL_VAL}/" \
         "${BASE_DIR}/Helpers/config.json"
 
     echo "Thresholds updated: warning=${WARN_VAL}%, failure=${FAIL_VAL}%"
